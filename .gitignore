@@ -1,0 +1,18 @@
+# Build artifacts
+practica2
+*.o
+
+# Generated simulation output
+salida.txt
+salida*.txt
+
+# Local academic report; review before publishing
+Memoria_*.pdf
+
+# macOS
+.DS_Store
+
+# Editor files
+.vscode/
+.idea/
+*.swp
