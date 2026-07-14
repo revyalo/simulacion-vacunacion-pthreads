@@ -29,6 +29,8 @@ typedef struct{
 typedef struct{
     int id;
     int stock_actual;
+    int demanda_pendiente;
+    int habitantes_asignados;
     int total_vacunas_recibidas;
     int total_vacunados;
     pthread_mutex_t mutexCentro;
@@ -49,6 +51,7 @@ typedef struct{
 
 typedef struct{
     int id;
+    int centro_id;
 }Habitante_t;
 
 // Variables globales
@@ -60,11 +63,9 @@ const char *fichero_entrada = "entrada.txt";
 const char *fichero_salida = "salida.txt";
 FILE *salida = NULL;
 
-// Contador de fabricas activas
-int fabricasActivas = FABRICAS;
-pthread_mutex_t mutexFabrica = PTHREAD_MUTEX_INITIALIZER; // Protege a fabricasActivas
 pthread_mutex_t mutexSalida = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutexAleatorio = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutexReparto = PTHREAD_MUTEX_INITIALIZER;
 
 // Declaracion de funciones
 int inicio(int argc, char *argv[]);
@@ -74,6 +75,7 @@ void estadisticas(void);
 void registrar_evento(const char *formato, ...);
 int aleatorio_entre(int minimo, int maximo);
 void dormir_aleatorio(int minimo, int maximo);
+void repartir_vacunas(Fabrica_t *fabrica, int vacunas);
 
 
 int main(int argc, char *argv[]){
@@ -87,7 +89,6 @@ int main(int argc, char *argv[]){
     int maxHabitantesPorTanda;
     int habitantesCreados;
     int habitantesCreadosTanda;
-    int idGlobal;
     pthread_t *hilosFabricas;
     pthread_t *hilosHabitantes;
     Habitante_t *argsHabitantes;
@@ -101,11 +102,11 @@ int main(int argc, char *argv[]){
         return 1;
     }
 
-    fabricasActivas = FABRICAS;
-
     for(i = 0; i < CENTROS; i++){
         centro[i].id = i + 1;
         centro[i].stock_actual = configuracion.vacunas_iniciales;
+        centro[i].demanda_pendiente = 0;
+        centro[i].habitantes_asignados = 0;
         centro[i].total_vacunas_recibidas = 0;
         centro[i].total_vacunados = 0;
 
@@ -113,9 +114,26 @@ int main(int argc, char *argv[]){
         pthread_cond_init(&centro[i].condicion_vacunas, NULL);
     }
 
+    argsHabitantes = malloc(sizeof(Habitante_t) * configuracion.habitantes_totales);
+    if(argsHabitantes == NULL){
+        perror("Error reservando memoria para los datos de habitantes");
+        fclose(salida);
+        return 1;
+    }
+
+    for(i = 0; i < configuracion.habitantes_totales; i++){
+        int centroAsignado = aleatorio_entre(0, CENTROS - 1);
+
+        argsHabitantes[i].id = i + 1;
+        argsHabitantes[i].centro_id = centroAsignado;
+        centro[centroAsignado].habitantes_asignados++;
+        centro[centroAsignado].demanda_pendiente++;
+    }
+
     hilosFabricas = malloc(sizeof(pthread_t) * FABRICAS);
     if(hilosFabricas == NULL){
         perror("Error reservando memoria para los hilos de las fabricas");
+        free(argsHabitantes);
         fclose(salida);
         return 1;
     }
@@ -151,6 +169,7 @@ int main(int argc, char *argv[]){
             pthread_join(hilosFabricas[j], NULL);
         }
         free(hilosFabricas);
+        free(argsHabitantes);
         fclose(salida);
         return 1;
     }
@@ -158,13 +177,11 @@ int main(int argc, char *argv[]){
     habitantesBase = configuracion.habitantes_totales / TANDAS;
     habitantesExtra = configuracion.habitantes_totales % TANDAS;
     maxHabitantesPorTanda = habitantesBase + (habitantesExtra > 0 ? 1 : 0);
-    idGlobal = 1;
     habitantesCreados = 0;
 
     hilosHabitantes = malloc(sizeof(pthread_t) * maxHabitantesPorTanda);
-    argsHabitantes = malloc(sizeof(Habitante_t) * configuracion.habitantes_totales);
 
-    if(hilosHabitantes == NULL || argsHabitantes == NULL){
+    if(hilosHabitantes == NULL){
         perror("Error reservando memoria para los hilos de habitantes");
         for ( i = 0; i < FABRICAS; i++)
         {
@@ -185,19 +202,17 @@ int main(int argc, char *argv[]){
         for ( i = 0; i < habitantesTandaActual; i++)
         {
             indice = habitantesCreados + i;
-            argsHabitantes[indice].id = idGlobal;
 
             {
                 int resultado = pthread_create(&hilosHabitantes[i], NULL, habitantes, (void*)&argsHabitantes[indice]);
                 if(resultado != 0){
-                    fprintf(stderr, "Error creando el hilo del habitante %d: %s\n", idGlobal, strerror(resultado));
+                    fprintf(stderr, "Error creando el hilo del habitante %d: %s\n", argsHabitantes[indice].id, strerror(resultado));
                     error = 1;
                     break;
                 }
             }
 
             habitantesCreadosTanda++;
-            idGlobal++;
         }
 
         for ( i = 0; i < habitantesCreadosTanda; i++)
@@ -236,9 +251,9 @@ int main(int argc, char *argv[]){
 
     fclose(salida);
 
-    pthread_mutex_destroy(&mutexFabrica);
     pthread_mutex_destroy(&mutexSalida);
     pthread_mutex_destroy(&mutexAleatorio);
+    pthread_mutex_destroy(&mutexReparto);
     return error ? 1 : 0;
 }
 
@@ -248,11 +263,14 @@ int inicio(int argc, char *argv[]){
     FILE *entrada;
     int camposLeidos;
 
-    if(argc >= 2){
+    if(argc == 2){
+        fichero_salida = argv[1];
+    }else if(argc == 3){
         fichero_entrada = argv[1];
-    }
-    if(argc >= 3){
         fichero_salida = argv[2];
+    }else if(argc > 3){
+        fprintf(stderr, "Uso: %s [fichero_salida] o %s [fichero_entrada fichero_salida]\n", argv[0], argv[0]);
+        return -1;
     }
 
     entrada = fopen(fichero_entrada, "r");
@@ -375,15 +393,88 @@ void dormir_aleatorio(int minimo, int maximo){
     }
 }
 
+void repartir_vacunas(Fabrica_t *fabrica, int vacunas){
+    int entregas[CENTROS] = {0};
+    int pendientes = vacunas;
+    int i;
+
+    pthread_mutex_lock(&mutexReparto);
+
+    while(pendientes > 0){
+        int centroObjetivo = -1;
+        int mayorDeficit = 0;
+
+        for(i = 0; i < CENTROS; i++){
+            int deficit;
+
+            pthread_mutex_lock(&centro[i].mutexCentro);
+            deficit = centro[i].demanda_pendiente - centro[i].stock_actual - entregas[i];
+            pthread_mutex_unlock(&centro[i].mutexCentro);
+
+            if(deficit > mayorDeficit){
+                mayorDeficit = deficit;
+                centroObjetivo = i;
+            }
+        }
+
+        if(centroObjetivo == -1){
+            break;
+        }
+
+        entregas[centroObjetivo]++;
+        pendientes--;
+    }
+
+    while(pendientes > 0){
+        int centroObjetivo = 0;
+        int menorStockProyectado;
+
+        pthread_mutex_lock(&centro[0].mutexCentro);
+        menorStockProyectado = centro[0].stock_actual + entregas[0];
+        pthread_mutex_unlock(&centro[0].mutexCentro);
+
+        for(i = 1; i < CENTROS; i++){
+            int stockProyectado;
+
+            pthread_mutex_lock(&centro[i].mutexCentro);
+            stockProyectado = centro[i].stock_actual + entregas[i];
+            pthread_mutex_unlock(&centro[i].mutexCentro);
+
+            if(stockProyectado < menorStockProyectado){
+                menorStockProyectado = stockProyectado;
+                centroObjetivo = i;
+            }
+        }
+
+        entregas[centroObjetivo]++;
+        pendientes--;
+    }
+
+    for(i = 0; i < CENTROS; i++){
+        if(entregas[i] <= 0){
+            continue;
+        }
+
+        dormir_aleatorio(0, configuracion.tiempo_max_reparto);
+
+        pthread_mutex_lock(&centro[i].mutexCentro);
+        centro[i].stock_actual += entregas[i];
+        centro[i].total_vacunas_recibidas += entregas[i];
+        fabrica -> vacunas_entregadas_por_centro[i] += entregas[i];
+
+        registrar_evento("Fabrica %d entrega %d vacunas en el centro %d\n", fabrica -> id, entregas[i], i + 1);
+
+        pthread_cond_broadcast(&centro[i].condicion_vacunas);
+        pthread_mutex_unlock(&centro[i].mutexCentro);
+    }
+
+    pthread_mutex_unlock(&mutexReparto);
+}
+
 // Funcion de fabricas
 void *fabricas(void *arg){ 
     Fabrica_t* fabrica = (Fabrica_t*) arg;
     int vacunas;
-    int i;
-    int sobras;
-    int reparto;
-    int entregar;
-    int k;
 
     while (fabrica -> vacunas_fabricas > 0)
     {
@@ -398,39 +489,7 @@ void *fabricas(void *arg){
 
         dormir_aleatorio(configuracion.tiempo_min_fabrica, configuracion.tiempo_max_fabrica);
 
-        reparto = vacunas / CENTROS;
-        sobras = vacunas % CENTROS;
-        
-    
-        for (i = 0; i < CENTROS; i++)
-        {
-            dormir_aleatorio(0, configuracion.tiempo_max_reparto);
-
-            // Protegemos el stock y notificamos a los habitantes
-            pthread_mutex_lock(&centro[i].mutexCentro);
-
-            entregar = reparto;
-
-            if (sobras)
-            {
-                entregar++;
-                sobras--;
-            }
-            
-
-            if(entregar > 0){
-                centro[i].stock_actual += entregar;
-                centro[i].total_vacunas_recibidas += entregar;
-                fabrica -> vacunas_entregadas_por_centro[i] += entregar;
-
-                registrar_evento("Fabrica %d entrega %d vacunas en el centro %d\n", fabrica -> id, entregar, i + 1);
-
-                // Avisamos a los habitantes que estaban esperando las vacunas
-                pthread_cond_broadcast(&centro[i].condicion_vacunas);
-            }
-
-            pthread_mutex_unlock(&centro[i].mutexCentro);
-        }
+        repartir_vacunas(fabrica, vacunas);
 
         fabrica -> vacunas_fabricas -= vacunas;
         
@@ -438,32 +497,14 @@ void *fabricas(void *arg){
 
     registrar_evento("Fabrica %d ha fabricado todas sus vacunas\n", fabrica -> id);
 
-    // Actualizamos el contador global de fabricas activas
-    pthread_mutex_lock(&mutexFabrica);
-    fabricasActivas--;
-    pthread_mutex_unlock(&mutexFabrica);
-
-    for ( k = 0; k < CENTROS; k++)
-    {
-        pthread_mutex_lock(&centro[k].mutexCentro);
-        pthread_cond_broadcast(&centro[k].condicion_vacunas);
-        pthread_mutex_unlock(&centro[k].mutexCentro);
-
-    }
-    
-
-
     return NULL;
 }
 
 // Funcion de los habitantes
 void *habitantes(void *arg){
     Habitante_t* habitante = (Habitante_t*) arg;
-    int centro_id;
+    int centro_id = habitante -> centro_id;
     Centro_t *c;
-
-    // Escogemos un centro aleatorio
-    centro_id = aleatorio_entre(0, CENTROS - 1);
 
     registrar_evento("Habitante %d elige el centro %d para vacunarse\n", habitante -> id, centro_id + 1);
 
@@ -477,23 +518,13 @@ void *habitantes(void *arg){
 
     // Esperamos si no hay vacunas disponibles
     while(c -> stock_actual <= 0){
-        pthread_mutex_lock(&mutexFabrica);
-        if(fabricasActivas == 0){
-            pthread_mutex_unlock(&mutexFabrica);
-            pthread_mutex_unlock(&c -> mutexCentro);
-            registrar_evento("Habitante %d no pudo vacunarse en el centro %d\n", habitante -> id, centro_id + 1);
-            return NULL;
-        }
-
-        pthread_mutex_unlock(&mutexFabrica);
-
-        // Esperamos hasta que lleguen las vacunas
         pthread_cond_wait(&c -> condicion_vacunas, &c -> mutexCentro);
     
     }
 
     // Vacunamos al habitante
     c -> stock_actual--;
+    c -> demanda_pendiente--;
     c -> total_vacunados++;
     pthread_mutex_unlock(&c -> mutexCentro);
 
@@ -536,8 +567,10 @@ void estadisticas(void){
         totalSobrantes += centro[i].stock_actual;
 
         registrar_evento(
-            "Centro %d -> recibidas: %d, vacunados: %d, sobran: %d\n",
+            "Centro %d -> asignados: %d, pendientes: %d, recibidas: %d, vacunados: %d, sobran: %d\n",
             centro[i].id,
+            centro[i].habitantes_asignados,
+            centro[i].demanda_pendiente,
             centro[i].total_vacunas_recibidas,
             centro[i].total_vacunados,
             centro[i].stock_actual

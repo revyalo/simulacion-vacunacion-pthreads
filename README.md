@@ -26,7 +26,7 @@ cc -Wall -Wextra -Wpedantic -O2 -pthread practica2.c -o practica2
 ## Ejecucion
 
 ```bash
-./practica2 entrada.example.txt salida.txt
+./practica2
 ```
 
 O con `make`:
@@ -36,6 +36,14 @@ make run
 ```
 
 El programa escribe el progreso por pantalla y tambien en el fichero de salida indicado.
+
+Argumentos admitidos:
+
+```bash
+./practica2                         # usa entrada.txt y salida.txt
+./practica2 resultado.txt           # usa entrada.txt y escribe en resultado.txt
+./practica2 config.txt resultado.txt # usa ambos ficheros explicitamente
+```
 
 ## Formato del fichero de entrada
 
@@ -60,6 +68,7 @@ Los tiempos estan expresados en segundos.
 - Validacion completa del fichero de entrada.
 - Reparto de habitantes aunque el total no sea multiplo de las tandas.
 - Reparto de vacunas aunque el total no sea multiplo de las fabricas.
+- Reparto de vacunas basado en la demanda pendiente de cada centro para evitar inanicion.
 - Generacion aleatoria protegida por mutex para evitar carreras de datos.
 - Escritura de eventos protegida por mutex para evitar logs intercalados.
 - Estadisticas finales agregadas.
@@ -69,6 +78,7 @@ Los tiempos estan expresados en segundos.
 ```text
 .
 ├── practica2.c
+├── entrada.txt
 ├── entrada.example.txt
 ├── Makefile
 ├── README.md

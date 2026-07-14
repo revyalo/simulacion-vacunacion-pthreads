@@ -4,7 +4,7 @@ LDFLAGS ?= -pthread
 
 TARGET := practica2
 SRC := practica2.c
-INPUT ?= entrada.example.txt
+INPUT ?= entrada.txt
 OUTPUT ?= salida.txt
 
 .PHONY: all run clean
@@ -18,4 +18,4 @@ run: $(TARGET)
 	./$(TARGET) $(INPUT) $(OUTPUT)
 
 clean:
-	rm -f $(TARGET) salida.txt *.o
+	rm -f $(TARGET) salida*.txt *.o
