@@ -1,29 +1,37 @@
-# Simulacion de vacunacion con pthreads
+# Simulación de vacunación con pthreads
 
-Proyecto academico en C que simula una campana de vacunacion usando hilos POSIX. El programa modela fabricas que producen vacunas, centros que reciben stock y habitantes que acuden a vacunarse por tandas.
+Proyecto académico en C que simula una campaña de vacunación usando hilos POSIX. El programa modela fábricas que producen vacunas, centros que reciben stock y habitantes que acuden a vacunarse por tandas.
 
-El objetivo principal es practicar programacion concurrente de bajo nivel: creacion de hilos, mutex, variables de condicion, sincronizacion de recursos compartidos y escritura coordinada de logs.
+El objetivo principal es practicar programación concurrente de bajo nivel: creación de hilos, mutex, variables de condición, sincronización de recursos compartidos y escritura coordinada de logs.
 
-## Por que encaja en un portfolio de ciberseguridad
+## Conceptos trabajados
 
-- Demuestra base de programacion de sistemas en C.
-- Usa sincronizacion explicita con `pthread_mutex_t` y `pthread_cond_t`.
-- Trata problemas habituales en software concurrente: carreras de datos, espera por recursos, validacion de entrada y logs desde varios hilos.
-- Es un buen punto de partida para hablar de robustez, comportamiento indefinido y programacion defensiva.
+- Creación y gestión de hilos mediante POSIX Threads.
+- Sincronización con `pthread_mutex_t`.
+- Coordinación mediante `pthread_cond_t`.
+- Gestión de recursos compartidos.
+- Prevención de condiciones de carrera.
+- Espera y señalización entre hilos.
+- Coordinación entre productores, centros y habitantes.
+- Validación de datos de entrada.
+- Escritura sincronizada de logs.
+- Cálculo de estadísticas al finalizar la simulación.
 
-## Compilacion
+El proyecto permite experimentar con problemas habituales de programación concurrente, como el acceso simultáneo a datos compartidos, la espera por recursos y la coordinación entre tareas que se ejecutan en paralelo.
+
+## Compilación
 
 ```bash
 make
 ```
 
-Tambien se puede compilar directamente:
+También se puede compilar directamente:
 
 ```bash
 cc -Wall -Wextra -Wpedantic -O2 -pthread practica2.c -o practica2
 ```
 
-## Ejecucion
+## Ejecución
 
 ```bash
 ./practica2
@@ -35,14 +43,14 @@ O con `make`:
 make run
 ```
 
-El programa escribe el progreso por pantalla y tambien en el fichero de salida indicado.
+El programa escribe el progreso por pantalla y también en el fichero de salida indicado.
 
 Argumentos admitidos:
 
 ```bash
-./practica2                         # usa entrada.txt y salida.txt
-./practica2 resultado.txt           # usa entrada.txt y escribe en resultado.txt
-./practica2 config.txt resultado.txt # usa ambos ficheros explicitamente
+./practica2                          # usa entrada.txt y salida.txt
+./practica2 resultado.txt            # usa entrada.txt y escribe en resultado.txt
+./practica2 config.txt resultado.txt # usa ambos ficheros explícitamente
 ```
 
 ## Formato del fichero de entrada
@@ -61,17 +69,17 @@ tiempo_maximo_cita
 tiempo_maximo_desplazamiento
 ```
 
-Los tiempos estan expresados en segundos.
+Los tiempos están expresados en segundos.
 
 ## Mejoras incluidas
 
-- Validacion completa del fichero de entrada.
-- Reparto de habitantes aunque el total no sea multiplo de las tandas.
-- Reparto de vacunas aunque el total no sea multiplo de las fabricas.
-- Reparto de vacunas basado en la demanda pendiente de cada centro para evitar inanicion.
-- Generacion aleatoria protegida por mutex para evitar carreras de datos.
+- Validación completa del fichero de entrada.
+- Reparto de habitantes aunque el total no sea múltiplo de las tandas.
+- Reparto de vacunas aunque el total no sea múltiplo de las fábricas.
+- Reparto de vacunas basado en la demanda pendiente de cada centro para evitar inanición.
+- Generación aleatoria protegida por mutex para evitar carreras de datos.
 - Escritura de eventos protegida por mutex para evitar logs intercalados.
-- Estadisticas finales agregadas.
+- Estadísticas finales agregadas.
 
 ## Estructura
 
@@ -85,4 +93,4 @@ Los tiempos estan expresados en segundos.
 └── LICENSE
 ```
 
-La memoria PDF original se conserva en local, pero no se versiona por defecto para evitar publicar datos personales o academicos sin una revision previa.
+La memoria PDF original se conserva en local, pero no se versiona por defecto para evitar publicar datos personales o académicos sin una revisión previa.
