@@ -1,6 +1,8 @@
 # Build artifacts
 practica2
 *.o
+build/
+benchmark
 
 # Generated simulation output
 salida.txt

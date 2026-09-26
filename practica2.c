@@ -6,9 +6,19 @@
 #include <string.h>
 #include <stdarg.h>
 
+#ifndef CENTROS
 #define CENTROS 5  // Numero de centros de vacunacion
+#endif
+#ifndef FABRICAS
 #define FABRICAS 3 // Numero de fabricas
+#endif
+#ifndef TANDAS
 #define TANDAS 10  // Numero de tandas de vacunacion
+#endif
+
+#if CENTROS < 1 || FABRICAS < 1 || TANDAS < 1
+#error "CENTROS, FABRICAS y TANDAS deben ser mayores que cero"
+#endif
 
 // Estructura para almacenar la configuracion
 typedef struct{
@@ -76,6 +86,7 @@ void registrar_evento(const char *formato, ...);
 int aleatorio_entre(int minimo, int maximo);
 void dormir_aleatorio(int minimo, int maximo);
 void repartir_vacunas(Fabrica_t *fabrica, int vacunas);
+void comprobar_pthread(int resultado, const char *operacion);
 
 
 int main(int argc, char *argv[]){
@@ -110,8 +121,8 @@ int main(int argc, char *argv[]){
         centro[i].total_vacunas_recibidas = 0;
         centro[i].total_vacunados = 0;
 
-        pthread_mutex_init(&centro[i].mutexCentro, NULL);
-        pthread_cond_init(&centro[i].condicion_vacunas, NULL);
+        comprobar_pthread(pthread_mutex_init(&centro[i].mutexCentro, NULL), "pthread_mutex_init");
+        comprobar_pthread(pthread_cond_init(&centro[i].condicion_vacunas, NULL), "pthread_cond_init");
     }
 
     argsHabitantes = malloc(sizeof(Habitante_t) * configuracion.habitantes_totales);
@@ -166,7 +177,7 @@ int main(int argc, char *argv[]){
     if(error){
         for ( j = 0; j < i; j++)
         {
-            pthread_join(hilosFabricas[j], NULL);
+            comprobar_pthread(pthread_join(hilosFabricas[j], NULL), "pthread_join fabrica");
         }
         free(hilosFabricas);
         free(argsHabitantes);
@@ -185,7 +196,7 @@ int main(int argc, char *argv[]){
         perror("Error reservando memoria para los hilos de habitantes");
         for ( i = 0; i < FABRICAS; i++)
         {
-            pthread_join(hilosFabricas[i], NULL);
+            comprobar_pthread(pthread_join(hilosFabricas[i], NULL), "pthread_join fabrica");
         }
         free(hilosFabricas);
         free(hilosHabitantes);
@@ -217,7 +228,7 @@ int main(int argc, char *argv[]){
 
         for ( i = 0; i < habitantesCreadosTanda; i++)
         {
-            pthread_join(hilosHabitantes[i], NULL);
+            comprobar_pthread(pthread_join(hilosHabitantes[i], NULL), "pthread_join habitante");
         }
 
         habitantesCreados += habitantesCreadosTanda;
@@ -228,7 +239,7 @@ int main(int argc, char *argv[]){
 
     for ( i = 0; i < FABRICAS; i++)
     {
-        pthread_join(hilosFabricas[i], NULL);
+        comprobar_pthread(pthread_join(hilosFabricas[i], NULL), "pthread_join fabrica");
     }
 
     if(error){
@@ -245,15 +256,18 @@ int main(int argc, char *argv[]){
 
     for ( i = 0; i < CENTROS; i++)
     {
-        pthread_mutex_destroy(&centro[i].mutexCentro);
-        pthread_cond_destroy(&centro[i].condicion_vacunas);
+        comprobar_pthread(pthread_mutex_destroy(&centro[i].mutexCentro), "pthread_mutex_destroy");
+        comprobar_pthread(pthread_cond_destroy(&centro[i].condicion_vacunas), "pthread_cond_destroy");
     }
 
-    fclose(salida);
+    if(fclose(salida) != 0){
+        perror("Error cerrando el fichero de salida");
+        error = 1;
+    }
 
-    pthread_mutex_destroy(&mutexSalida);
-    pthread_mutex_destroy(&mutexAleatorio);
-    pthread_mutex_destroy(&mutexReparto);
+    comprobar_pthread(pthread_mutex_destroy(&mutexSalida), "pthread_mutex_destroy salida");
+    comprobar_pthread(pthread_mutex_destroy(&mutexAleatorio), "pthread_mutex_destroy aleatorio");
+    comprobar_pthread(pthread_mutex_destroy(&mutexReparto), "pthread_mutex_destroy reparto");
     return error ? 1 : 0;
 }
 
@@ -262,6 +276,7 @@ int main(int argc, char *argv[]){
 int inicio(int argc, char *argv[]){
     FILE *entrada;
     int camposLeidos;
+    char datoExtra;
 
     if(argc == 2){
         fichero_salida = argv[1];
@@ -294,10 +309,17 @@ int inicio(int argc, char *argv[]){
         &configuracion.tiempo_max_desplazamiento
     );
 
-    fclose(entrada);
+    if(camposLeidos == 9 && fscanf(entrada, " %c", &datoExtra) == 1){
+        camposLeidos = 10;
+    }
+
+    if(fclose(entrada) != 0){
+        perror("Error cerrando el fichero de entrada");
+        return -1;
+    }
 
     if(camposLeidos != 9){
-        fprintf(stderr, "Error: el fichero de entrada debe contener 9 valores enteros\n");
+        fprintf(stderr, "Error: el fichero de entrada debe contener exactamente 9 valores enteros\n");
         return -1;
     }
 
@@ -355,7 +377,7 @@ int inicio(int argc, char *argv[]){
 void registrar_evento(const char *formato, ...){
     va_list argumentos;
 
-    pthread_mutex_lock(&mutexSalida);
+    comprobar_pthread(pthread_mutex_lock(&mutexSalida), "pthread_mutex_lock salida");
 
     va_start(argumentos, formato);
     vprintf(formato, argumentos);
@@ -368,7 +390,7 @@ void registrar_evento(const char *formato, ...){
         fflush(salida);
     }
 
-    pthread_mutex_unlock(&mutexSalida);
+    comprobar_pthread(pthread_mutex_unlock(&mutexSalida), "pthread_mutex_unlock salida");
 }
 
 int aleatorio_entre(int minimo, int maximo){
@@ -378,9 +400,9 @@ int aleatorio_entre(int minimo, int maximo){
         return minimo;
     }
 
-    pthread_mutex_lock(&mutexAleatorio);
+    comprobar_pthread(pthread_mutex_lock(&mutexAleatorio), "pthread_mutex_lock aleatorio");
     valor = minimo + rand() % (maximo - minimo + 1);
-    pthread_mutex_unlock(&mutexAleatorio);
+    comprobar_pthread(pthread_mutex_unlock(&mutexAleatorio), "pthread_mutex_unlock aleatorio");
 
     return valor;
 }
@@ -393,12 +415,19 @@ void dormir_aleatorio(int minimo, int maximo){
     }
 }
 
+void comprobar_pthread(int resultado, const char *operacion){
+    if(resultado != 0){
+        fprintf(stderr, "Error en %s: %s\n", operacion, strerror(resultado));
+        abort();
+    }
+}
+
 void repartir_vacunas(Fabrica_t *fabrica, int vacunas){
     int entregas[CENTROS] = {0};
     int pendientes = vacunas;
     int i;
 
-    pthread_mutex_lock(&mutexReparto);
+    comprobar_pthread(pthread_mutex_lock(&mutexReparto), "pthread_mutex_lock reparto");
 
     while(pendientes > 0){
         int centroObjetivo = -1;
@@ -407,9 +436,9 @@ void repartir_vacunas(Fabrica_t *fabrica, int vacunas){
         for(i = 0; i < CENTROS; i++){
             int deficit;
 
-            pthread_mutex_lock(&centro[i].mutexCentro);
+            comprobar_pthread(pthread_mutex_lock(&centro[i].mutexCentro), "pthread_mutex_lock centro");
             deficit = centro[i].demanda_pendiente - centro[i].stock_actual - entregas[i];
-            pthread_mutex_unlock(&centro[i].mutexCentro);
+            comprobar_pthread(pthread_mutex_unlock(&centro[i].mutexCentro), "pthread_mutex_unlock centro");
 
             if(deficit > mayorDeficit){
                 mayorDeficit = deficit;
@@ -429,16 +458,16 @@ void repartir_vacunas(Fabrica_t *fabrica, int vacunas){
         int centroObjetivo = 0;
         int menorStockProyectado;
 
-        pthread_mutex_lock(&centro[0].mutexCentro);
+        comprobar_pthread(pthread_mutex_lock(&centro[0].mutexCentro), "pthread_mutex_lock centro");
         menorStockProyectado = centro[0].stock_actual + entregas[0];
-        pthread_mutex_unlock(&centro[0].mutexCentro);
+        comprobar_pthread(pthread_mutex_unlock(&centro[0].mutexCentro), "pthread_mutex_unlock centro");
 
         for(i = 1; i < CENTROS; i++){
             int stockProyectado;
 
-            pthread_mutex_lock(&centro[i].mutexCentro);
+            comprobar_pthread(pthread_mutex_lock(&centro[i].mutexCentro), "pthread_mutex_lock centro");
             stockProyectado = centro[i].stock_actual + entregas[i];
-            pthread_mutex_unlock(&centro[i].mutexCentro);
+            comprobar_pthread(pthread_mutex_unlock(&centro[i].mutexCentro), "pthread_mutex_unlock centro");
 
             if(stockProyectado < menorStockProyectado){
                 menorStockProyectado = stockProyectado;
@@ -457,18 +486,18 @@ void repartir_vacunas(Fabrica_t *fabrica, int vacunas){
 
         dormir_aleatorio(0, configuracion.tiempo_max_reparto);
 
-        pthread_mutex_lock(&centro[i].mutexCentro);
+        comprobar_pthread(pthread_mutex_lock(&centro[i].mutexCentro), "pthread_mutex_lock centro");
         centro[i].stock_actual += entregas[i];
         centro[i].total_vacunas_recibidas += entregas[i];
         fabrica -> vacunas_entregadas_por_centro[i] += entregas[i];
 
         registrar_evento("Fabrica %d entrega %d vacunas en el centro %d\n", fabrica -> id, entregas[i], i + 1);
 
-        pthread_cond_broadcast(&centro[i].condicion_vacunas);
-        pthread_mutex_unlock(&centro[i].mutexCentro);
+        comprobar_pthread(pthread_cond_broadcast(&centro[i].condicion_vacunas), "pthread_cond_broadcast");
+        comprobar_pthread(pthread_mutex_unlock(&centro[i].mutexCentro), "pthread_mutex_unlock centro");
     }
 
-    pthread_mutex_unlock(&mutexReparto);
+    comprobar_pthread(pthread_mutex_unlock(&mutexReparto), "pthread_mutex_unlock reparto");
 }
 
 // Funcion de fabricas
@@ -514,11 +543,11 @@ void *habitantes(void *arg){
     dormir_aleatorio(0, configuracion.tiempo_max_desplazamiento);
 
     c = &centro[centro_id];
-    pthread_mutex_lock(&c -> mutexCentro);
+    comprobar_pthread(pthread_mutex_lock(&c -> mutexCentro), "pthread_mutex_lock centro");
 
     // Esperamos si no hay vacunas disponibles
     while(c -> stock_actual <= 0){
-        pthread_cond_wait(&c -> condicion_vacunas, &c -> mutexCentro);
+        comprobar_pthread(pthread_cond_wait(&c -> condicion_vacunas, &c -> mutexCentro), "pthread_cond_wait");
     
     }
 
@@ -526,7 +555,7 @@ void *habitantes(void *arg){
     c -> stock_actual--;
     c -> demanda_pendiente--;
     c -> total_vacunados++;
-    pthread_mutex_unlock(&c -> mutexCentro);
+    comprobar_pthread(pthread_mutex_unlock(&c -> mutexCentro), "pthread_mutex_unlock centro");
 
     registrar_evento("Habitante %d vacunado en el centro %d\n", habitante -> id, centro_id + 1);
 
