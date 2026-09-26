@@ -1,61 +1,73 @@
 # Simulación de vacunación con pthreads
 
-Proyecto académico en C que simula una campaña de vacunación usando hilos POSIX. El programa modela fábricas que producen vacunas, centros que reciben stock y habitantes que acuden a vacunarse por tandas.
+Simulación concurrente en C11 de una campaña de vacunación. Las fábricas producen y reparten dosis mientras los habitantes esperan en su centro mediante variables de condición. El proyecto pone el foco en invariantes, propiedad de los datos, prevención de carreras y comprobación automatizada, no solo en crear hilos.
 
-El objetivo principal es practicar programación concurrente de bajo nivel: creación de hilos, mutex, variables de condición, sincronización de recursos compartidos y escritura coordinada de logs.
-
-## Conceptos trabajados
-
-- Creación y gestión de hilos mediante POSIX Threads.
-- Sincronización con `pthread_mutex_t`.
-- Coordinación mediante `pthread_cond_t`.
-- Gestión de recursos compartidos.
-- Prevención de condiciones de carrera.
-- Espera y señalización entre hilos.
-- Coordinación entre productores, centros y habitantes.
-- Validación de datos de entrada.
-- Escritura sincronizada de logs.
-- Cálculo de estadísticas al finalizar la simulación.
-
-El proyecto permite experimentar con problemas habituales de programación concurrente, como el acceso simultáneo a datos compartidos, la espera por recursos y la coordinación entre tareas que se ejecutan en paralelo.
-
-## Compilación
+## Ejecución rápida
 
 ```bash
-make
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/practica2 entrada.example.txt salida.txt
 ```
 
-También se puede compilar directamente:
+También se admite:
 
 ```bash
-cc -Wall -Wextra -Wpedantic -O2 -pthread practica2.c -o practica2
+./build/practica2                          # entrada.txt -> salida.txt
+./build/practica2 resultado.txt            # entrada.txt -> resultado.txt
+./build/practica2 config.txt resultado.txt # rutas explícitas
 ```
 
-## Ejecución
+El progreso aparece en pantalla y en el fichero de salida. El resumen final comprueba vacunas producidas/recibidas, habitantes vacunados, demanda pendiente y stock sobrante.
 
-```bash
-./practica2
+## Modelo concurrente
+
+```mermaid
+flowchart LR
+    F1[Fábrica 1] --> R[Planificador de reparto]
+    F2[Fábrica 2] --> R
+    FN[Fábrica N] --> R
+    R --> C1[Centro 1: stock y condición]
+    R --> C2[Centro 2: stock y condición]
+    R --> CN[Centro N: stock y condición]
+    H1[Habitantes asignados] --> C1
+    H2[Habitantes asignados] --> C2
+    HN[Habitantes asignados] --> CN
+    F1 --> L[Log sincronizado]
+    H1 --> L
 ```
 
-O con `make`:
+- Cada fábrica tiene un hilo productor y estado privado (`vacunas_fabricas`, asignación y entregas).
+- Cada habitante se ejecuta en un hilo, creado en tandas para limitar concurrencia simultánea.
+- Cada centro encapsula stock, demanda, contadores, un mutex y una variable de condición.
+- Un habitante sin stock ejecuta `pthread_cond_wait`: libera atómicamente el mutex y duerme hasta una entrega.
+- Una fábrica actualiza stock bajo el mutex del centro y despierta a los consumidores con `pthread_cond_broadcast`.
 
-```bash
-make run
-```
+## Recursos compartidos e invariantes
 
-El programa escribe el progreso por pantalla y también en el fichero de salida indicado.
+| Recurso | Protección | Invariante |
+| --- | --- | --- |
+| `Centro_t.stock_actual`, demanda y contadores | `centro[i].mutexCentro` | El stock no es negativo y cada vacunación reduce stock y demanda exactamente una vez. |
+| Selección global de destinos | `mutexReparto` | Dos fábricas no calculan simultáneamente sobre la misma fotografía de demanda/stock. |
+| `rand()` | `mutexAleatorio` | La función global no se ejecuta concurrentemente. |
+| `stdout` y fichero de log | `mutexSalida` | Cada evento se escribe completo y en el mismo orden en ambos destinos. |
+| Espera por dosis | `condicion_vacunas` + mutex del centro | La condición se verifica siempre dentro de un `while`, tolerando despertares espurios. |
 
-Argumentos admitidos:
+El orden de adquisición es `mutexReparto -> mutexCentro -> mutexSalida`. Ningún camino toma esos locks en orden inverso; esto evita esperas circulares. Los habitantes liberan el mutex del centro antes de registrar su evento.
 
-```bash
-./practica2                          # usa entrada.txt y salida.txt
-./practica2 resultado.txt            # usa entrada.txt y escribe en resultado.txt
-./practica2 config.txt resultado.txt # usa ambos ficheros explícitamente
-```
+### Carreras evitadas
 
-## Formato del fichero de entrada
+- Sin el mutex de centro, una entrega y una vacunación podrían perder actualizaciones de stock.
+- Sin proteger `demanda_pendiente`, varias fábricas podrían tomar decisiones con lecturas inconsistentes.
+- Sin mutex de salida, dos llamadas a `vfprintf` podrían intercalar líneas y corromper el log lógico.
+- `rand()` mantiene estado global; serializarlo evita una carrera dentro de la biblioteca C.
+- Las estadísticas solo se calculan después de hacer `pthread_join` a todos los productores y consumidores, estableciendo la relación *happens-before* necesaria.
 
-El fichero de entrada debe contener 9 enteros, en este orden:
+Todos los retornos de `pthread_mutex_*`, `pthread_cond_*` y `pthread_join` se comprueban. Los fallos recuperables de `pthread_create` generan un cierre ordenado; una violación inesperada de una primitiva de sincronización se informa y aborta para no continuar con estado posiblemente corrupto.
+
+## Formato de entrada
+
+El fichero contiene exactamente nueve enteros:
 
 ```text
 habitantes_totales
@@ -69,28 +81,75 @@ tiempo_maximo_cita
 tiempo_maximo_desplazamiento
 ```
 
-Los tiempos están expresados en segundos.
+Los tiempos se expresan en segundos. Se rechazan campos ausentes, datos adicionales, habitantes no positivos, vacunas negativas, rangos invertidos y tiempos negativos.
 
-## Mejoras incluidas
+## Compilación y pruebas
 
-- Validación completa del fichero de entrada.
-- Reparto de habitantes aunque el total no sea múltiplo de las tandas.
-- Reparto de vacunas aunque el total no sea múltiplo de las fábricas.
-- Reparto de vacunas basado en la demanda pendiente de cada centro para evitar inanición.
-- Generación aleatoria protegida por mutex para evitar carreras de datos.
-- Escritura de eventos protegida por mutex para evitar logs intercalados.
-- Estadísticas finales agregadas.
+Con Make:
+
+```bash
+make
+make test
+```
+
+Con CMake/CTest:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+La suite recompila la simulación con `FABRICAS=1`, `2`, `4` y `8`; comprueba que los 17 habitantes terminan vacunados, cubre el caso límite de un solo habitante y verifica el rechazo de entradas con campos extra.
+
+### Sanitizers y Valgrind
+
+```bash
+cmake -S . -B build-asan -DENABLE_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-asan
+ctest --test-dir build-asan --output-on-failure
+
+cmake -S . -B build-tsan -DENABLE_THREAD_SANITIZER=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-tsan
+ctest --test-dir build-tsan --output-on-failure -R simulation
+```
+
+AddressSanitizer/UBSan y ThreadSanitizer se activan por separado porque sus runtimes no son compatibles entre sí. GitHub Actions ejecuta ambos perfiles, la matriz GCC/Clang y una comprobación adicional con Valgrind (`--leak-check=full --track-fds=yes`).
+
+## Benchmark y speedup
+
+Los `sleep` de la simulación representan latencia humana/logística y no sirven para medir escalado de CPU. Por eso `benchmark.c` aísla una fase determinista de procesamiento de registros, ejecuta exactamente el mismo trabajo secuencial y particionado entre pthreads, y valida ambos resultados mediante checksum.
+
+```bash
+./benchmark --threads 4 --items 3000000 --rounds 30
+make benchmark-run
+```
+
+`make benchmark-run` mide 1, 2, 4 y 8 hilos, guarda `benchmarks/results.csv` y genera la gráfica SVG únicamente con herramientas estándar. Los resultados versionados son una muestra obtenida en una máquina concreta; deben regenerarse para comparar otro hardware.
+
+![Gráfica de speedup](benchmarks/speedup.svg)
+
+Muestra actual:
+
+| Hilos | Secuencial | Paralelo | Speedup |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.451 s | 0.422 s | 1.07x |
+| 2 | 0.422 s | 0.210 s | 2.01x |
+| 4 | 0.420 s | 0.107 s | 3.92x |
+| 8 | 0.417 s | 0.068 s | 6.12x |
 
 ## Estructura
 
 ```text
 .
 ├── practica2.c
+├── benchmark.c
 ├── entrada.txt
 ├── entrada.example.txt
+├── tests/
+├── scripts/
+├── benchmarks/
+├── CMakeLists.txt
 ├── Makefile
-├── README.md
-└── LICENSE
+└── .github/workflows/ci.yml
 ```
-
-La memoria PDF original se conserva en local, pero no se versiona por defecto para evitar publicar datos personales o académicos sin una revisión previa.
